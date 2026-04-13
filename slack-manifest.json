@@ -17,7 +17,7 @@
     "slash_commands": [
       {
         "command": "/ders",
-        "url": "https://man-differences-benjamin-hanging.trycloudflare.com/slack/commands",
+        "url": "https://deutschmeister-production-b04a.up.railway.app/slack/commands",
         "description": "Yeni bir Almanca ders seansı başlatır.",
         "usage_hint": "[seviye]",
         "should_localize": false
@@ -39,7 +39,7 @@
   },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://man-differences-benjamin-hanging.trycloudflare.com/slack/events",
+      "request_url": "https://deutschmeister-production-b04a.up.railway.app/slack/events",
       "bot_events": [
         "message.channels",
         "message.im"
@@ -47,7 +47,7 @@
     },
     "interactivity": {
       "is_enabled": true,
-      "request_url": "https://man-differences-benjamin-hanging.trycloudflare.com/slack/actions"
+      "request_url": "https://deutschmeister-production-b04a.up.railway.app/slack/actions"
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": false,
