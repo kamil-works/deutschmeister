@@ -182,6 +182,8 @@ async def _handle_message_event(event: dict):
     channel       = event.get("channel")
     text_msg      = event.get("text", "").strip()
 
+    print(f"[SLACK] user={slack_user_id} channel={channel} text={repr(text_msg)}", flush=True)
+
     if not slack_user_id or not text_msg:
         return
 
@@ -191,8 +193,8 @@ async def _handle_message_event(event: dict):
         await _handle_voice_command(slack_user_id, channel)
         return
 
-    # Profil oluşturma: "profil: İsim, Yaş, Seviye"
-    if lower.startswith("profil:"):
+    # Profil oluşturma tetikleyicileri
+    if lower.startswith("profil:") or lower.startswith("profil oluştur"):
         await _handle_profile_create(slack_user_id, channel, text_msg)
         return
 
@@ -227,8 +229,20 @@ async def _handle_profile_create(slack_user_id: str, channel: str, text: str):
     """
     import re
 
-    # "profil:" sonrasını al
-    raw = text[len("profil:"):].strip()
+    print(f"[SLACK] profil oluşturma: user={slack_user_id} text={repr(text)}", flush=True)
+
+    # "profil:" veya "profil oluştur" sonrasını al
+    lower = text.lower()
+    if lower.startswith("profil:"):
+        raw = text[len("profil:"):].strip()
+    elif lower.startswith("profil oluştur"):
+        raw = text[len("profil oluştur"):].strip().lstrip(":").strip()
+    else:
+        raw = text.strip()
+
+    # Virgül veya boşlukla ayır
+    parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
+    print(f"[SLACK] parse parts: {parts}", flush=True)
     # Virgül veya boşlukla ayır
     parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
 
@@ -274,6 +288,7 @@ async def _handle_profile_create(slack_user_id: str, channel: str, text: str):
             db.add(profile)
             await db.commit()
 
+        print(f"[SLACK] profil oluşturuldu: name={name} age={age} level={level}", flush=True)
         await _slack_post(
             channel,
             text=(
@@ -284,8 +299,9 @@ async def _handle_profile_create(slack_user_id: str, channel: str, text: str):
             ),
         )
     except Exception as e:
+        print(f"[SLACK] profil_create_error: {e}", flush=True)
         logger.error("profile_create_error", slack_user_id=slack_user_id, error=str(e))
-        await _slack_post(channel, text="Profil oluşturulamadı, tekrar dene.")
+        await _slack_post(channel, text=f"Profil oluşturulamadı: {e}")
 
 
 async def _handle_voice_command(slack_user_id: str, channel: str):
