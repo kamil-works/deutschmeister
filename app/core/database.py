@@ -4,6 +4,7 @@ Her route'da `get_db` dependency ile async session alınır.
 """
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -30,6 +31,18 @@ async def init_db() -> None:
     """Tabloları oluştur (Alembic'ten önce geliştirme kolaylığı için)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # session_insights SQLAlchemy modeli dışında — raw SQL ile oluştur
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS session_insights (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  TEXT NOT NULL,
+                profile_id  TEXT NOT NULL,
+                status      TEXT DEFAULT 'pending',
+                data        TEXT,
+                error       TEXT,
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
