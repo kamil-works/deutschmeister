@@ -1,10 +1,8 @@
 [build]
-# Railway Dockerfile'ı otomatik algılar, ama açık belirtmek daha güvenli
 dockerfile = "Dockerfile"
 
 [deploy]
-startCommand = "python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
