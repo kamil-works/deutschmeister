@@ -1,0 +1,56 @@
+{
+  "display_information": {
+    "name": "DeutschMeister",
+    "description": "AI Destekli Almanca Öğretmeni",
+    "background_color": "#2c3e50"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "bot_user": {
+      "display_name": "DeutschMeister",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/ders",
+        "url": "https://man-differences-benjamin-hanging.trycloudflare.com/slack/commands",
+        "description": "Yeni bir Almanca ders seansı başlatır.",
+        "usage_hint": "[seviye]",
+        "should_localize": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "channels:history",
+        "channels:read",
+        "chat:write",
+        "im:history",
+        "im:read",
+        "im:write",
+        "commands"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://man-differences-benjamin-hanging.trycloudflare.com/slack/events",
+      "bot_events": [
+        "message.channels",
+        "message.im"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://man-differences-benjamin-hanging.trycloudflare.com/slack/actions"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

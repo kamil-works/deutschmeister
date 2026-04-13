@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>DeutschMeister — Sesli Ders</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0f0f13;
+      --surface: #1a1a24;
+      --border:  #2a2a3a;
+      --text:    #e8e8f0;
+      --muted:   #7070a0;
+      --blue:    #6366f1;
+      --green:   #10b981;
+      --red:     #ef4444;
+      --gold:    #f59e0b;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    .page {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 2rem;
+      padding: 2rem;
+    }
+
+    /* ── Durum yazısı ───────────────────────────── */
+    .status {
+      font-size: 0.9375rem;
+      color: var(--muted);
+      min-height: 1.5rem;
+      text-align: center;
+      transition: opacity 0.3s;
+    }
+    .status.pulse { animation: pulse-text 2s infinite; }
+    @keyframes pulse-text {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+
+    /* ── Ses dalgası halkaları ─────────────────── */
+    .rings {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid var(--blue);
+      animation: ring-expand 2s infinite ease-out;
+      transform: translate(-50%, -50%);
+    }
+    .ring-outer { width: 240px; height: 240px; opacity: 0.25; animation-delay: 0s; }
+    .ring-inner { width: 190px; height: 190px; opacity: 0.35; animation-delay: 0.6s; }
+    @keyframes ring-expand {
+      0%   { transform: translate(-50%, -50%) scale(0.85); opacity: 0.5; }
+      100% { transform: translate(-50%, -50%) scale(1.15); opacity: 0; }
+    }
+
+    /* ── Ana buton ─────────────────────────────── */
+    .main-btn {
+      width: 140px; height: 140px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      position: relative; z-index: 1;
+      transition: transform 0.12s, box-shadow 0.2s, background 0.3s;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    .main-btn svg { color: #fff; pointer-events: none; }
+
+    .btn-idle {
+      background: var(--surface);
+      border: 2px solid var(--border);
+    }
+    .btn-idle svg { color: var(--muted); }
+
+    .btn-connecting {
+      background: var(--surface);
+      border: 2px solid var(--gold);
+    }
+    .btn-ready {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      box-shadow: 0 8px 32px rgb(99 102 241 / 0.4);
+    }
+    .btn-ready:active { transform: scale(1.04); }
+
+    .btn-user {
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      box-shadow: 0 8px 32px rgb(59 130 246 / 0.5);
+      animation: user-pulse 1s ease-in-out infinite alternate;
+    }
+    @keyframes user-pulse {
+      from { box-shadow: 0 8px 32px rgb(59 130 246 / 0.4); }
+      to   { box-shadow: 0 8px 48px rgb(59 130 246 / 0.7); }
+    }
+
+    .btn-model {
+      background: linear-gradient(135deg, #10b981, #059669);
+      box-shadow: 0 8px 32px rgb(16 185 129 / 0.45);
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      border: 3px solid rgb(255 255 255 / 0.2);
+      border-top-color: #fff;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── İpucu yazısı ──────────────────────────── */
+    .hint {
+      font-size: 0.8125rem;
+      color: var(--muted);
+      text-align: center;
+      max-width: 240px;
+      line-height: 1.5;
+    }
+
+    /* ── Bitir butonu ─────────────────────────── */
+    .end-btn {
+      background: transparent;
+      border: 1px solid var(--red);
+      color: var(--red);
+      padding: 0.5rem 1.5rem;
+      border-radius: 999px;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: none;
+    }
+    .end-btn.visible { display: block; }
+    .end-btn:hover { background: rgb(239 68 68 / 0.1); }
+
+    /* ── Hata mesajı ───────────────────────────── */
+    .error-box {
+      background: rgb(239 68 68 / 0.1);
+      border: 1px solid var(--red);
+      color: var(--red);
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      text-align: center;
+      max-width: 320px;
+      display: none;
+    }
+    .error-box.visible { display: block; }
+  </style>
+</head>
+<body>
+
+<div class="page">
+  <div class="status" id="status">Başlamak için butona dokun</div>
+
+  <!-- Ses dalgası (model konuşurken) -->
+  <div class="rings" id="rings" style="display:none">
+    <div class="ring ring-outer"></div>
+    <div class="ring ring-inner"></div>
+  </div>
+
+  <!-- Ana buton -->
+  <button class="main-btn btn-idle" id="mainBtn" aria-label="Başlamak için dokun">
+    <svg id="btnIcon" width="44" height="44" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="1.8">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      <line x1="12" y1="19" x2="12" y2="23"/>
+      <line x1="8"  y1="23" x2="16" y2="23"/>
+    </svg>
+  </button>
+
+  <p class="hint" id="hint">Almanca öğretmeninle sesli pratik yap</p>
+
+  <button class="end-btn" id="endBtn">Dersi Bitir</button>
+
+  <div class="error-box" id="errorBox"></div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Konfigürasyon
+// ─────────────────────────────────────────────────────────────────────────────
+const BACKEND_HTTP = window.location.origin;           // FastAPI ile aynı origin
+const BACKEND_WS   = BACKEND_HTTP.replace(/^http/, 'ws');
+const SESSION_ID   = new URLSearchParams(location.search).get('id');
+const RETRY_DELAYS = [500, 1000, 2000, 4000];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI referansları
+// ─────────────────────────────────────────────────────────────────────────────
+const statusEl  = document.getElementById('status');
+const ringsEl   = document.getElementById('rings');
+const mainBtn   = document.getElementById('mainBtn');
+const btnIcon   = document.getElementById('btnIcon');
+const hintEl    = document.getElementById('hint');
+const endBtn    = document.getElementById('endBtn');
+const errorBox  = document.getElementById('errorBox');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Uygulama durumu
+// ─────────────────────────────────────────────────────────────────────────────
+const state = {
+  status: 'idle',         // idle | connecting | connected | reconnecting
+  isHolding: false,
+  isModelSpeaking: false,
+};
+
+function setState(patch) {
+  Object.assign(state, patch);
+  render();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render
+// ─────────────────────────────────────────────────────────────────────────────
+const MIC_SVG = `<svg width="44" height="44" viewBox="0 0 24 24" fill="none"
+  stroke="currentColor" stroke-width="1.8">
+  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+  <line x1="12" y1="19" x2="12" y2="23"/>
+  <line x1="8"  y1="23" x2="16" y2="23"/>
+</svg>`;
+
+const SPINNER_HTML = `<div class="spinner"></div>`;
+
+function render() {
+  const { status, isHolding, isModelSpeaking } = state;
+  const isConnected   = status === 'connected';
+  const isConnecting  = status === 'connecting' || status === 'reconnecting';
+
+  // Buton durumu
+  let btnClass, label, hint;
+  if (!isConnected && !isConnecting) {
+    btnClass = 'btn-idle';
+    label    = 'Başlamak için dokun';
+    hint     = 'Almanca öğretmeninle sesli pratik yap';
+  } else if (isConnecting) {
+    btnClass = 'btn-connecting';
+    label    = 'Bağlanıyor…';
+    hint     = '';
+  } else if (isModelSpeaking) {
+    btnClass = 'btn-model';
+    label    = 'Öğretmen konuşuyor';
+    hint     = 'Öğretmen bitirince konuşabilirsin';
+  } else if (isHolding) {
+    btnClass = 'btn-user';
+    label    = 'Dinleniyor…';
+    hint     = 'Bırak → öğretmen yanıtlayacak';
+  } else {
+    btnClass = 'btn-ready';
+    label    = 'Bas ve konuş';
+    hint     = 'Butona basılı tut, bırakınca öğretmen yanıtlar';
+  }
+
+  // Sınıflar
+  mainBtn.className = `main-btn ${btnClass}`;
+  mainBtn.setAttribute('aria-label', label);
+
+  // İkon
+  btnIcon.innerHTML = isConnecting ? SPINNER_HTML : MIC_SVG;
+
+  // Yazılar
+  statusEl.textContent = label;
+  statusEl.classList.toggle('pulse', isConnecting || isModelSpeaking);
+  hintEl.textContent   = hint;
+
+  // Ses halkaları
+  ringsEl.style.display = isModelSpeaking ? 'block' : 'none';
+
+  // Bitir butonu
+  endBtn.classList.toggle('visible', isConnected);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AudioPlayback
+// ─────────────────────────────────────────────────────────────────────────────
+class AudioPlayback {
+  constructor() {
+    this._ctx = null;
+    this._gainNode = null;
+    this._nextStartTime = 0;
+    this._initialized = false;
+  }
+
+  init() {
+    if (this._initialized) return;
+    this._ctx = new AudioContext({ sampleRate: 24000 });
+    this._gainNode = this._ctx.createGain();
+    this._gainNode.connect(this._ctx.destination);
+    this._nextStartTime = this._ctx.currentTime;
+    this._initialized = true;
+  }
+
+  enqueue(rawPcm) {
+    if (!this._ctx || !this._gainNode) return;
+    const int16   = new Int16Array(rawPcm);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768.0;
+
+    const buffer = this._ctx.createBuffer(1, float32.length, 24000);
+    buffer.copyToChannel(float32, 0);
+
+    const source = this._ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this._gainNode);
+
+    const now = this._ctx.currentTime;
+    if (this._nextStartTime < now) this._nextStartTime = now;
+    source.start(this._nextStartTime);
+    this._nextStartTime += buffer.duration;
+  }
+
+  interrupt() {
+    if (!this._ctx || !this._gainNode) return;
+    this._gainNode.disconnect();
+    this._gainNode = this._ctx.createGain();
+    this._gainNode.connect(this._ctx.destination);
+    this._nextStartTime = this._ctx.currentTime;
+  }
+
+  destroy() {
+    this._gainNode?.disconnect();
+    this._ctx?.close();
+    this._ctx = null;
+    this._gainNode = null;
+    this._initialized = false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AudioCapture
+// ─────────────────────────────────────────────────────────────────────────────
+class AudioCapture {
+  constructor(onChunk, onStateChange) {
+    this._onChunk = onChunk;
+    this._onStateChange = onStateChange;
+    this._ctx = null;
+    this._workletNode = null;
+    this._source = null;
+    this._stream = null;
+    this._active = false;
+  }
+
+  get isActive() { return this._active; }
+
+  async start() {
+    if (this._active) return;
+
+    if (typeof AudioWorkletNode === 'undefined') {
+      throw new Error('Ses özelliği bu tarayıcıda desteklenmiyor. Lütfen Chrome veya Edge kullanın.');
+    }
+
+    this._stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false,
+    });
+
+    this._ctx = new AudioContext();
+    if (this._ctx.state === 'suspended') await this._ctx.resume();
+
+    await this._ctx.audioWorklet.addModule('/static/audio-processor.js');
+
+    this._workletNode = new AudioWorkletNode(this._ctx, 'audio-processor', {
+      processorOptions: { targetSampleRate: 16000 },
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
+      channelCount: 1,
+    });
+
+    this._workletNode.port.onmessage = (e) => {
+      if (e.data.type === 'pcm16') {
+        this._onChunk(this._toBase64(e.data.buffer));
+      }
+    };
+
+    this._source = this._ctx.createMediaStreamSource(this._stream);
+    this._source.connect(this._workletNode);
+    this._active = true;
+    this._onStateChange?.(true);
+  }
+
+  stop() {
+    if (!this._active) return;
+    this._workletNode?.disconnect();
+    this._source?.disconnect();
+    this._stream?.getTracks().forEach(t => t.stop());
+    this._ctx?.close();
+    this._workletNode = null;
+    this._source = null;
+    this._stream = null;
+    this._ctx = null;
+    this._active = false;
+    this._onStateChange?.(false);
+  }
+
+  _toBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunk = 8192;
+    for (let i = 0; i < bytes.length; i += chunk)
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    return btoa(binary);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GeminiLiveClient
+// ─────────────────────────────────────────────────────────────────────────────
+class GeminiLiveClient {
+  constructor() {
+    this._ws = null;
+    this._capture = null;
+    this._playback = new AudioPlayback();
+    this._retryCount = 0;
+    this._sessionId = SESSION_ID;
+    this._destroyed = false;
+  }
+
+  async connect() {
+    if (this._destroyed) return;
+    this._playback.init();
+    setState({ status: 'connecting' });
+
+    if (!this._sessionId) {
+      showError('URL\'de oturum ID\'si eksik. Slack\'ten tekrar link alın.');
+      return;
+    }
+    this._openWS();
+  }
+
+  async startCapture() {
+    if (this._capture?.isActive) return;
+    this._capture = new AudioCapture(
+      (b64) => this._sendAudio(b64),
+      (active) => { /* isteğe bağlı state */ }
+    );
+    await this._capture.start();
+  }
+
+  stopCapture() {
+    this._capture?.stop();
+    this._capture = null;
+  }
+
+  disconnect() {
+    this._destroyed = true;
+    this.stopCapture();
+    this._ws?.close(1000, 'Kullanıcı dersi bitirdi');
+    this._ws = null;
+    this._playback.destroy();
+    setState({ status: 'idle', isHolding: false, isModelSpeaking: false });
+  }
+
+  _openWS() {
+    if (this._destroyed || !this._sessionId) return;
+    const ws = new WebSocket(`${BACKEND_WS}/api/voice/ws/${this._sessionId}`);
+    this._ws = ws;
+
+    ws.onopen = () => {
+      this._retryCount = 0;
+      setState({ status: 'connected' });
+    };
+
+    ws.onmessage = (e) => this._handleMessage(e);
+
+    ws.onclose = (e) => {
+      setState({ isModelSpeaking: false });
+      if (this._destroyed) return;
+      if (e.code === 1000) { setState({ status: 'idle' }); return; }
+      this._scheduleReconnect();
+    };
+  }
+
+  _scheduleReconnect() {
+    if (this._retryCount >= RETRY_DELAYS.length) {
+      showError('Bağlantı kurulamadı. Sayfayı yenileyip tekrar deneyin.');
+      return;
+    }
+    const delay = RETRY_DELAYS[this._retryCount++];
+    setState({ status: 'reconnecting' });
+    setTimeout(() => { if (!this._destroyed) this._openWS(); }, delay);
+  }
+
+  _handleMessage(e) {
+    if (e.data instanceof ArrayBuffer) {
+      this._playback.enqueue(e.data);
+      setState({ isModelSpeaking: true });
+      return;
+    }
+    if (e.data instanceof Blob) {
+      e.data.arrayBuffer().then(buf => {
+        this._playback.enqueue(buf);
+        setState({ isModelSpeaking: true });
+      });
+      return;
+    }
+    try {
+      const msg = JSON.parse(e.data);
+      this._handleJSON(msg);
+    } catch { /* ignore */ }
+  }
+
+  _handleJSON(msg) {
+    if (msg.type === 'goAway') return;
+    if ('setupComplete' in msg) return;
+
+    const sc = msg.serverContent;
+    if (!sc) return;
+
+    if (sc.turnComplete)        setState({ isModelSpeaking: false });
+    if (sc.interrupted)       { this._playback.interrupt(); setState({ isModelSpeaking: false }); }
+  }
+
+  _sendAudio(b64) {
+    if (this._ws?.readyState !== WebSocket.OPEN) return;
+    this._ws.send(JSON.stringify({
+      realtime_input: { media_chunks: [{ mime_type: 'audio/pcm', data: b64 }] }
+    }));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hata göster
+// ─────────────────────────────────────────────────────────────────────────────
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.add('visible');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Oturum ID kontrolü
+// ─────────────────────────────────────────────────────────────────────────────
+if (!SESSION_ID) {
+  showError('Geçersiz link. Slack\'ten gelen linki kullanın.');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Client başlat
+// ─────────────────────────────────────────────────────────────────────────────
+let client = null;
+
+mainBtn.addEventListener('pointerdown', async () => {
+  if (!SESSION_ID) return;
+
+  if (state.status === 'idle') {
+    client = new GeminiLiveClient();
+    await client.connect();
+    return;
+  }
+  if (state.status !== 'connected') return;
+
+  setState({ isHolding: true });
+  try {
+    await client.startCapture();
+  } catch (err) {
+    showError(err.message);
+    setState({ isHolding: false });
+  }
+});
+
+mainBtn.addEventListener('pointerup', () => {
+  if (!state.isHolding) return;
+  setState({ isHolding: false });
+  client?.stopCapture();
+});
+
+mainBtn.addEventListener('pointerleave', () => {
+  if (!state.isHolding) return;
+  setState({ isHolding: false });
+  client?.stopCapture();
+});
+
+endBtn.addEventListener('click', () => {
+  client?.disconnect();
+  client = null;
+
+  // Slack'e ders sonu bildirimi gönder (arka planda)
+  if (SESSION_ID) {
+    fetch(`${BACKEND_HTTP}/api/sessions/end`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: SESSION_ID }),
+    }).catch(() => {});
+  }
+
+  // Kısa gecikme sonrası pencereyi kapat (Slack in-app browser için)
+  setTimeout(() => {
+    window.close();
+    // window.close() çalışmazsa bilgilendirici mesaj göster
+    statusEl.textContent = 'Ders tamamlandı. Bu sekmeyi kapatabilirsiniz.';
+  }, 500);
+});
+
+// İlk render
+render();
+</script>
+</body>
+</html>
