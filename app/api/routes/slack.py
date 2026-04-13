@@ -106,7 +106,7 @@ async def _slack_post(channel: str, text: str = None, blocks: list = None):
 
 async def _get_profile_id(slack_user_id: str) -> str | None:
     """profiles tablosundan slack_user_id ile profile_id bul."""
-    async with get_db_session() as db:
+    async with AsyncSessionLocal() as db:
         row = await db.execute(
             text("SELECT id FROM profiles WHERE slack_user_id = :uid"),
             {"uid": slack_user_id},
