@@ -19,8 +19,7 @@
         "command": "/ders",
         "url": "https://deutschmeister-production-b04a.up.railway.app/slack/commands",
         "description": "Yeni bir Almanca ders seansı başlatır.",
-        "usage_hint": "[seviye]",
-        "should_localize": false
+        "usage_hint": "[seviye]"
       }
     ]
   },
