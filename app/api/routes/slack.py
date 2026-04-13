@@ -191,15 +191,21 @@ async def _handle_message_event(event: dict):
         await _handle_voice_command(slack_user_id, channel)
         return
 
+    # Profil oluşturma: "profil: İsim, Yaş, Seviye"
+    if lower.startswith("profil:"):
+        await _handle_profile_create(slack_user_id, channel, text_msg)
+        return
+
     # Profile bul
     profile_id = await _get_profile_id(slack_user_id)
     if not profile_id:
         await _slack_post(
             channel,
             text=(
-                "Henüz bir profilin yok. "
-                "Lütfen /yeni-profil <isim> <yaş> <seviye> formatıyla profil oluştur.\n"
-                "Seviye: A1, A2, B1 veya B2"
+                "Henüz bir profilin yok. Profil oluşturmak için şunu yaz:\n\n"
+                "*profil: İsmin, Yaşın, Seviye*\n\n"
+                "Örnek: `profil: Kamil, 34, A1`\n"
+                "Seviye seçenekleri: A1, A2, B1, B2"
             ),
         )
         return
@@ -212,6 +218,74 @@ async def _handle_message_event(event: dict):
     except Exception as e:
         logger.error("chat_error", profile_id=profile_id, error=str(e))
         await _slack_post(channel, text="Öğretmen şu an yanıt veremiyor, biraz sonra tekrar dene.")
+
+
+async def _handle_profile_create(slack_user_id: str, channel: str, text: str):
+    """
+    'profil: İsim, Yaş, Seviye' formatını parse edip profil oluşturur.
+    slack_user_id ve slack_channel_id de kaydedilir.
+    """
+    import re
+
+    # "profil:" sonrasını al
+    raw = text[len("profil:"):].strip()
+    # Virgül veya boşlukla ayır
+    parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
+
+    # Geçerli seviyeler
+    valid_levels = {"a1", "a2", "b1", "b2"}
+
+    name = None
+    age = None
+    level = None
+
+    for part in parts:
+        if part.lower() in valid_levels:
+            level = part.upper()
+        elif part.isdigit():
+            age = int(part)
+        elif name is None:
+            name = part
+
+    if not name or not level:
+        await _slack_post(
+            channel,
+            text=(
+                "Format anlaşılamadı. Lütfen şöyle yaz:\n"
+                "`profil: İsmin, Yaşın, Seviye`\n"
+                "Örnek: `profil: Kamil, 34, A1`"
+            ),
+        )
+        return
+
+    try:
+        from app.models.db import Profile
+        import uuid
+
+        async with AsyncSessionLocal() as db:
+            profile = Profile(
+                id=str(uuid.uuid4()),
+                name=name,
+                age=age,
+                level=level,
+                slack_user_id=slack_user_id,
+                slack_channel_id=channel,
+            )
+            db.add(profile)
+            await db.commit()
+
+        await _slack_post(
+            channel,
+            text=(
+                f"Profil oluşturuldu! Merhaba *{name}* 👋\n"
+                f"Seviye: *{level}*{f', Yaş: *{age}*' if age else ''}\n\n"
+                "Artık benimle Almanca pratik yapabilirsin. "
+                "Ses dersi için `ders başlat` yaz."
+            ),
+        )
+    except Exception as e:
+        logger.error("profile_create_error", slack_user_id=slack_user_id, error=str(e))
+        await _slack_post(channel, text="Profil oluşturulamadı, tekrar dene.")
 
 
 async def _handle_voice_command(slack_user_id: str, channel: str):
