@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.db import Profile
 from app.schemas.structured_outputs import ProfileCreate, ProfileOut, ProfileUpdate
+from app.services.fsrs_engine import FSRSEngine
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
@@ -15,6 +16,11 @@ async def create_profile(body: ProfileCreate, db: AsyncSession = Depends(get_db)
     db.add(profile)
     await db.flush()
     await db.refresh(profile)
+
+    # Yeni profil için FSRS kartlarını otomatik oluştur
+    engine = FSRSEngine(db)
+    await engine.initialize_cards(profile_id=profile.id, level=profile.level)
+
     return profile
 
 

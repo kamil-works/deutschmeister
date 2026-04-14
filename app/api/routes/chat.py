@@ -55,7 +55,7 @@ def _build_context(
         f"## KULLANICI PROFİLİ",
         f"- Ad: {profile.name}",
         f"- Yaş: {profile.age or 'belirtilmemiş'}",
-        f"- Seviye: {profile.level} ({getattr(profile, 'level_code', 'A1')})",
+        f"- Seviye: {profile.level}",
     ]
 
     if phoneme_scores:

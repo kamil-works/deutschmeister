@@ -363,6 +363,7 @@ async def _handle_profile_create(slack_user_id: str, channel: str, text: str):
 
     try:
         from app.models.db import Profile
+        from app.services.fsrs_engine import FSRSEngine
         import uuid
 
         async with AsyncSessionLocal() as db:
@@ -375,6 +376,12 @@ async def _handle_profile_create(slack_user_id: str, channel: str, text: str):
                 slack_channel_id=channel,
             )
             db.add(profile)
+            await db.flush()
+
+            # Yeni profil için FSRS kartlarını otomatik oluştur
+            engine = FSRSEngine(db)
+            await engine.initialize_cards(profile_id=profile.id, level=level)
+
             await db.commit()
 
         print(f"[SLACK] profil oluşturuldu: name={name} age={age} level={level}", flush=True)
