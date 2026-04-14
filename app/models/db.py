@@ -44,6 +44,7 @@ class Profile(Base):
     # Slack entegrasyonu
     slack_user_id: Mapped[str | None] = mapped_column(String, nullable=True, unique=True)
     slack_channel_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_reminder_date: Mapped[str | None] = mapped_column(String, nullable=True)
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     phoneme_scores: Mapped[list["PhonemeScore"]] = relationship(back_populates="profile", cascade="all, delete-orphan")

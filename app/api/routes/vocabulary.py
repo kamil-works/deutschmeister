@@ -504,6 +504,8 @@ Hata Düzeltme: Her seansta min 2 kritik hatayı seans sonu Türkçe açıklamay
 L1 Girişimi: Türkçe SOV yapısını izle. Almanca V2 kuralını açıkça modelle.
 Kaygı Durumu: {plan.anxiety_signal} — {anxiety_instruction}
 
+⚠️ HALLÜSİNASYON YASAĞI: Yukarıdaki kelime listesindeki artikeller veritabanından doğrulanmıştır. Listede olmayan bir isim öğretmek gerekirse artikelini KENDİN TAHMIN ETME — yanlış artikel öğretmek yanlış öğrenmeden çok daha zararlıdır. Emin olmadığında "bu kelimenin artikelini sözlükten kontrol edelim" de.
+
 [═ ADAPTİF ÖĞRETMEN NOTLARI — BU ÖĞRENCİYE ÖZGÜ ═]
 Önceki Seans Gözlemi: {tutor_obs or 'Henüz veri yok, bu ilk seans.'}
 İlgi Alanları: {hooks_str} — örneklerini bu konulardan seç.

@@ -1,6 +1,7 @@
 """
 DeutschMeister v2 — FastAPI uygulaması giriş noktası.
 """
+import asyncio
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from app.api.routes import chat, exercises, profiles, pronunciation, voice, vocabulary, slack
+from app.services.daily_reminder import reminder_loop
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, init_db
 from app.services.session_analyzer import SessionAnalyzer
@@ -64,6 +66,7 @@ def create_app() -> FastAPI:
         logger.info("app_starting", cors_origins=settings.cors_origins_list)
         await init_db()
         logger.info("database_ready")
+        asyncio.create_task(reminder_loop())
 
         # Önceki oturumdan kalan başarısız analizleri yeniden dene
         try:
