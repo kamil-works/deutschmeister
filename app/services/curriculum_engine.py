@@ -78,7 +78,7 @@ class CurriculumEngine:
         """
         # 1. Profil bilgisi
         profile = await self._get_profile(profile_id)
-        current_level = profile.get("level_code", "A1")  # A1|A2|B1|B2
+        current_level = profile.get("level", "A1")  # A1|A2|B1|B2
 
         # 2. anxiety_signal — son oturum analizinden veya default
         anxiety = "low"
@@ -186,7 +186,7 @@ class CurriculumEngine:
         Döner: {old_level, new_level, changed, reason}
         """
         profile = await self._get_profile(profile_id)
-        current_level = profile.get("level_code", "A1")
+        current_level = profile.get("level", "A1")
         current_idx = LEVELS.index(current_level) if current_level in LEVELS else 0
 
         anxiety = "low"
@@ -263,7 +263,7 @@ class CurriculumEngine:
 
         if changed:
             await self.db.execute(text("""
-                UPDATE profiles SET level_code = :level WHERE id = :profile_id
+                UPDATE profiles SET level = :level WHERE id = :profile_id
             """), {"level": new_level, "profile_id": profile_id})
             await self.db.commit()
             logger.info(f"Level güncellendi: {current_level} → {new_level} ({reason})")
@@ -281,12 +281,12 @@ class CurriculumEngine:
     # ──────────────────────────────────────────────────────────────────────
     async def _get_profile(self, profile_id: str) -> dict:
         result = await self.db.execute(text("""
-            SELECT id, name, level_code FROM profiles WHERE id = :id
+            SELECT id, name, level FROM profiles WHERE id = :id
         """), {"id": profile_id})
         row = result.fetchone()
         if not row:
-            return {"id": profile_id, "name": "Öğrenci", "level_code": "A1"}
-        return {"id": row[0], "name": row[1], "level_code": row[2] or "A1"}
+            return {"id": profile_id, "name": "Öğrenci", "level": "A1"}
+        return {"id": row[0], "name": row[1], "level": row[2] or "A1"}
 
     async def _select_topic(
         self,
