@@ -27,10 +27,19 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+async def _add_column_if_missing(conn, table: str, column: str, definition: str) -> None:
+    """SQLite ALTER TABLE ADD COLUMN — kolon zaten varsa sessizce geçer."""
+    try:
+        await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+    except Exception:
+        pass  # kolon zaten var
+
+
 async def init_db() -> None:
-    """Tabloları oluştur (Alembic'ten önce geliştirme kolaylığı için)."""
+    """Tabloları oluştur + eksik kolonları ekle."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
         # session_insights SQLAlchemy modeli dışında — raw SQL ile oluştur
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS session_insights (
@@ -43,6 +52,11 @@ async def init_db() -> None:
                 created_at  TEXT DEFAULT (datetime('now'))
             )
         """))
+
+        # Sonradan eklenen kolonlar — var olan DB'lere de ekle
+        await _add_column_if_missing(conn, "profiles", "last_reminder_date", "TEXT")
+        await _add_column_if_missing(conn, "profiles", "reminder_snoozed_until", "TEXT")
+        await _add_column_if_missing(conn, "profiles", "reminder_state", "TEXT")
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
