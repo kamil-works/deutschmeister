@@ -15,13 +15,13 @@ from pydantic import BaseModel, Field, field_validator
 class ProfileCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     age: int | None = Field(None, ge=4, le=120)
-    level: Literal["beginner", "intermediate", "advanced"] = "beginner"
+    level: Literal["A1", "A2", "B1", "B2"] = "A1"
 
 
 class ProfileUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     age: int | None = Field(None, ge=4, le=120)
-    level: Literal["beginner", "intermediate", "advanced"] | None = None
+    level: Literal["A1", "A2", "B1", "B2"] | None = None
 
 
 class ProfileOut(BaseModel):
