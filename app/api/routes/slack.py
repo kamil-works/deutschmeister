@@ -212,6 +212,20 @@ async def _handle_message_event(event: dict):
         )
         return
 
+    # Snooze state: bot saat bekliyorsa önce onu yakala
+    if await _is_waiting_for_reminder_time(profile_id):
+        await _handle_snooze_time_reply(profile_id, channel, text_msg)
+        return
+
+    # "Sonra yapalım" → saat sor
+    _SNOOZE_TRIGGERS = {
+        "sonra", "sonra yapalım", "sonra yaparım", "daha sonra", "şimdi değil",
+        "biraz sonra", "sonra hatırlat", "hatırlat", "remind me later",
+    }
+    if lower.strip().rstrip(".,!?") in _SNOOZE_TRIGGERS or "sonra hatırlat" in lower:
+        await _ask_snooze_time(profile_id, channel)
+        return
+
     # Chat logic'i direkt çağır
     try:
         from app.api.routes.chat import _chat_logic
@@ -220,6 +234,81 @@ async def _handle_message_event(event: dict):
     except Exception as e:
         logger.error("chat_error", profile_id=profile_id, error=str(e))
         await _slack_post(channel, text="Öğretmen şu an yanıt veremiyor, biraz sonra tekrar dene.")
+
+
+async def _is_waiting_for_reminder_time(profile_id: str) -> bool:
+    """Profilin reminder_state'i 'waiting_for_time' mi?"""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            text("SELECT reminder_state FROM profiles WHERE id = :pid"),
+            {"pid": profile_id},
+        )
+        row = result.fetchone()
+        return row and row[0] == "waiting_for_time"
+
+
+async def _ask_snooze_time(profile_id: str, channel: str) -> None:
+    """Kullanıcıya saat sor, reminder_state'i 'waiting_for_time' yap."""
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            text("UPDATE profiles SET reminder_state = 'waiting_for_time' WHERE id = :pid"),
+            {"pid": profile_id},
+        )
+        await db.commit()
+    await _slack_post(
+        channel,
+        text="Tamam! Saat kaçta hatırlatayım? _(Örnek: 21:00 ya da 21.30)_",
+    )
+
+
+async def _handle_snooze_time_reply(profile_id: str, channel: str, text_msg: str) -> None:
+    """
+    Kullanıcının girdiği saati parse et, reminder_snoozed_until'e kaydet.
+    Kabul edilen formatlar: 21:00 / 21.00 / 21 / saat 21 / 9pm vb.
+    Zaman Türkiye saatiyle yorumlanır (UTC+3), UTC'ye çevrilir.
+    """
+    import re
+
+    # Saat parse et
+    cleaned = text_msg.strip().lower()
+    cleaned = cleaned.replace("saat", "").replace("'da", "").replace("'de", "").strip()
+
+    # HH:MM veya HH.MM veya sadece HH
+    match = re.search(r"(\d{1,2})[.:](\d{2})", cleaned)
+    if match:
+        hour, minute = int(match.group(1)), int(match.group(2))
+    else:
+        match = re.search(r"\b(\d{1,2})\b", cleaned)
+        if match:
+            hour, minute = int(match.group(1)), 0
+        else:
+            await _slack_post(channel, text="Saati anlayamadım. Örnek: `21:00` veya `21.30` yaz.")
+            return
+
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        await _slack_post(channel, text="Geçerli bir saat gir. Örnek: `21:00`")
+        return
+
+    # Türkiye saati → UTC (UTC+3)
+    utc_hour = (hour - 3) % 24
+    utc_time_str = f"{utc_hour:02d}:{minute:02d}"
+
+    # TR saatini göster (kullanıcıya)
+    tr_time_str = f"{hour:02d}:{minute:02d}"
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("""
+            UPDATE profiles
+            SET reminder_snoozed_until = :utc_time,
+                reminder_state = NULL
+            WHERE id = :pid
+        """), {"utc_time": utc_time_str, "pid": profile_id})
+        await db.commit()
+
+    await _slack_post(
+        channel,
+        text=f"Tamam! Saat *{tr_time_str}*'de hatırlatırım. Görüşürüz!",
+    )
 
 
 async def _handle_profile_create(slack_user_id: str, channel: str, text: str):

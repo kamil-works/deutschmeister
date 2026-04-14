@@ -45,6 +45,8 @@ class Profile(Base):
     slack_user_id: Mapped[str | None] = mapped_column(String, nullable=True, unique=True)
     slack_channel_id: Mapped[str | None] = mapped_column(String, nullable=True)
     last_reminder_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    reminder_snoozed_until: Mapped[str | None] = mapped_column(String, nullable=True)  # "HH:MM"
+    reminder_state: Mapped[str | None] = mapped_column(String, nullable=True)  # "waiting_for_time" | null
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     phoneme_scores: Mapped[list["PhonemeScore"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
