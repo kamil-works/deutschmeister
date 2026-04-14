@@ -58,6 +58,27 @@ async def init_db() -> None:
         await _add_column_if_missing(conn, "profiles", "reminder_snoozed_until", "TEXT")
         await _add_column_if_missing(conn, "profiles", "reminder_state", "TEXT")
 
+        # daily_logs tablosu (SQLAlchemy Base.metadata ile oluşturulur ama garantilemek için)
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS daily_logs (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id       TEXT NOT NULL,
+                log_date         TEXT NOT NULL,
+                session_count    INTEGER DEFAULT 0,
+                total_duration_s INTEGER DEFAULT 0,
+                words_learned    INTEGER DEFAULT 0,
+                words_struggled  INTEGER DEFAULT 0,
+                words_mastered   INTEGER DEFAULT 0,
+                session_quality  REAL,
+                anxiety_signal   TEXT,
+                ai_impressions   TEXT,
+                error_patterns   TEXT,
+                created_at       TEXT DEFAULT (datetime('now')),
+                updated_at       TEXT DEFAULT (datetime('now')),
+                UNIQUE(profile_id, log_date)
+            )
+        """))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI Depends() ile kullanılacak session factory."""

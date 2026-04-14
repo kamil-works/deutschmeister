@@ -122,20 +122,26 @@ async def _check_snooze_reminders() -> None:
 
 async def _send_daily_reminders() -> int:
     """
-    Günlük sabit saatte bugün henüz hatırlatma gönderilmemiş profillere gönderir.
-    snooze ayarlı profilleri atlar (onlar kendi saatlerinde gelecek).
+    Günlük sabit saatte gönderir.
+    Atlanır: bugün zaten ders yapıldıysa VEYA snooze ayarlıysa.
     """
-    today = date.today().isoformat()
+    from datetime import timedelta
+    tr_tz = timezone(timedelta(hours=3))
+    today_tr = datetime.now(tr_tz).strftime("%Y-%m-%d")
     sent = 0
     async with AsyncSessionLocal() as db:
         result = await db.execute(text("""
-            SELECT id, name, level, slack_user_id
-            FROM profiles
-            WHERE slack_user_id IS NOT NULL
-              AND slack_user_id != ''
-              AND (last_reminder_date IS NULL OR last_reminder_date != :today)
-              AND (reminder_snoozed_until IS NULL OR reminder_snoozed_until = '')
-        """), {"today": today})
+            SELECT p.id, p.name, p.level, p.slack_user_id
+            FROM profiles p
+            WHERE p.slack_user_id IS NOT NULL
+              AND p.slack_user_id != ''
+              AND (p.last_reminder_date IS NULL OR p.last_reminder_date != :today)
+              AND (p.reminder_snoozed_until IS NULL OR p.reminder_snoozed_until = '')
+              AND NOT EXISTS (
+                  SELECT 1 FROM daily_logs dl
+                  WHERE dl.profile_id = p.id AND dl.log_date = :today
+              )
+        """), {"today": today_tr})
         profiles = result.fetchall()
         for profile_id, name, level, slack_user_id in profiles:
             await _send_reminder_to_profile(

@@ -106,3 +106,26 @@ class Exercise(Base):
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     profile: Mapped["Profile"] = relationship(back_populates="exercises")
+
+
+class DailyLog(Base):
+    """
+    Günlük ders takibi — her kullanıcı için her gün bir kayıt.
+    SessionAnalyzer tamamlandıktan sonra doldurulur.
+    """
+    __tablename__ = "daily_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_id: Mapped[str] = mapped_column(String, ForeignKey("profiles.id"), nullable=False)
+    log_date: Mapped[str] = mapped_column(String, nullable=False)          # "YYYY-MM-DD" (TR günü)
+    session_count: Mapped[int] = mapped_column(Integer, default=0)         # gün içinde kaç ders
+    total_duration_s: Mapped[int] = mapped_column(Integer, default=0)      # toplam süre (saniye)
+    words_learned: Mapped[int] = mapped_column(Integer, default=0)         # yeni öğrenilen
+    words_struggled: Mapped[int] = mapped_column(Integer, default=0)       # zorlanılan
+    words_mastered: Mapped[int] = mapped_column(Integer, default=0)        # ustalaşılan (FSRS)
+    session_quality: Mapped[float | None] = mapped_column(nullable=True)   # 0.0 – 1.0
+    anxiety_signal: Mapped[str | None] = mapped_column(String, nullable=True)  # low|medium|high
+    ai_impressions: Mapped[str | None] = mapped_column(Text, nullable=True)    # AI özet (Türkçe)
+    error_patterns: Mapped[str | None] = mapped_column(Text, nullable=True)    # JSON liste
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

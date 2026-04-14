@@ -156,6 +156,9 @@ class SessionAnalyzer:
         # Agent Strategy'yi güncelle (Layer 2 — Reflection)
         await self._update_agent_strategy(profile_id, insight)
 
+        # DailyLog'u güncelle
+        await self._update_daily_log(profile_id, session_id, insight)
+
         logger.info(
             f"Session {session_id} analiz tamamlandı: "
             f"mastered={len(insight.get('mastered',[]))} "
@@ -450,3 +453,76 @@ class SessionAnalyzer:
             f"agent_strategy güncellendi: profile={profile_id} "
             f"scaffolding={scaffolding} sessions={sessions_count}"
         )
+
+    async def _update_daily_log(self, profile_id: str, session_id: str, insight: dict) -> None:
+        """
+        Günlük ders logunu güncelle. Her analiz sonrası çağrılır.
+        Aynı günde birden fazla ders varsa mevcut kaydı günceller.
+        Tarih Türkiye saatiyle (UTC+3) hesaplanır.
+        """
+        from datetime import timezone, timedelta
+        import json as _json
+
+        tr_tz = timezone(timedelta(hours=3))
+        today_tr = datetime.now(tr_tz).strftime("%Y-%m-%d")
+
+        # Session süresini çek
+        sess_result = await self.db.execute(text("""
+            SELECT duration_s FROM sessions WHERE id = :sid
+        """), {"sid": session_id})
+        sess_row = sess_result.fetchone()
+        duration_s = sess_row[0] if sess_row and sess_row[0] else 0
+
+        mastered = len(insight.get("mastered", []))
+        struggled = len(insight.get("struggled", []))
+        quality = insight.get("session_quality", 0.0)
+        anxiety = insight.get("anxiety_signal", "low")
+        summary = insight.get("summary_tr", "")
+        errors = _json.dumps(insight.get("error_patterns", []), ensure_ascii=False)
+
+        # Bugün için kayıt var mı?
+        existing = await self.db.execute(text("""
+            SELECT id, session_count, total_duration_s, words_learned,
+                   words_struggled, words_mastered
+            FROM daily_logs
+            WHERE profile_id = :pid AND log_date = :today
+        """), {"pid": profile_id, "today": today_tr})
+        row = existing.fetchone()
+
+        if row:
+            log_id = row[0]
+            await self.db.execute(text("""
+                UPDATE daily_logs SET
+                    session_count    = session_count + 1,
+                    total_duration_s = total_duration_s + :dur,
+                    words_learned    = words_learned + :learned,
+                    words_struggled  = words_struggled + :struggled,
+                    words_mastered   = words_mastered + :mastered,
+                    session_quality  = :quality,
+                    anxiety_signal   = :anxiety,
+                    ai_impressions   = :summary,
+                    error_patterns   = :errors,
+                    updated_at       = datetime('now')
+                WHERE id = :lid
+            """), {
+                "dur": duration_s, "learned": mastered, "struggled": struggled,
+                "mastered": mastered, "quality": quality, "anxiety": anxiety,
+                "summary": summary, "errors": errors, "lid": log_id,
+            })
+        else:
+            await self.db.execute(text("""
+                INSERT INTO daily_logs
+                    (profile_id, log_date, session_count, total_duration_s,
+                     words_learned, words_struggled, words_mastered,
+                     session_quality, anxiety_signal, ai_impressions, error_patterns)
+                VALUES
+                    (:pid, :today, 1, :dur, :learned, :struggled, :mastered,
+                     :quality, :anxiety, :summary, :errors)
+            """), {
+                "pid": profile_id, "today": today_tr, "dur": duration_s,
+                "learned": mastered, "struggled": struggled, "mastered": mastered,
+                "quality": quality, "anxiety": anxiety, "summary": summary, "errors": errors,
+            })
+
+        await self.db.commit()
+        logger.info(f"daily_log_updated profile={profile_id} date={today_tr}")
