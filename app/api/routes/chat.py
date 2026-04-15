@@ -200,6 +200,8 @@ async def _chat_logic(profile_id: str, message: str, db=None) -> str:
     """
     from app.core.database import AsyncSessionLocal
 
+    print(f"[CHAT] _chat_logic start: profile_id={profile_id} msg={repr(message[:40])}", flush=True)
+
     _close_db = False
     if db is None:
         db = AsyncSessionLocal()
@@ -208,12 +210,15 @@ async def _chat_logic(profile_id: str, message: str, db=None) -> str:
     try:
         profile = await db.get(Profile, profile_id)
         if not profile:
+            print(f"[CHAT] profile not found: {profile_id}", flush=True)
             return "Profil bulunamadı."
 
         # ── 1. Session aç / mevcut session'ı bul ──────────────────────────
+        print(f"[CHAT] getting/creating session for profile {profile_id}", flush=True)
         session_id, plan_json, is_new_session = await _get_or_create_active_session(
             db, profile_id
         )
+        print(f"[CHAT] session_id={session_id} is_new={is_new_session} has_plan={plan_json is not None}", flush=True)
 
         # ── 2. Plan: yeni session → üret + kaydet; mevcut → yükle ─────────
         plan: SessionPlan | None = None
@@ -324,6 +329,7 @@ async def _chat_logic(profile_id: str, message: str, db=None) -> str:
             reply_text = response.text or "Yanıt oluşturulamadı."
         except Exception as exc:
             logger.error("gemini_chat_error", error=str(exc))
+            print(f"[CHAT] gemini error: {exc}", flush=True)
             reply_text = "Bir hata oluştu, lütfen tekrar dene."
 
         # ── 6. Model yanıtını kaydet ───────────────────────────────────────
@@ -348,6 +354,9 @@ async def _chat_logic(profile_id: str, message: str, db=None) -> str:
 
         return reply_text
 
+    except Exception as exc:
+        print(f"[CHAT] UNHANDLED ERROR: {type(exc).__name__}: {exc}", flush=True)
+        raise
     finally:
         if _close_db:
             await db.close()
