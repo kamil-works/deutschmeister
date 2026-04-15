@@ -121,6 +121,7 @@ async def init_db() -> None:
         await _add_column_if_missing(conn, "profiles", "last_reminder_date", "TEXT")
         await _add_column_if_missing(conn, "profiles", "reminder_snoozed_until", "TEXT")
         await _add_column_if_missing(conn, "profiles", "reminder_state", "TEXT")
+        await _add_column_if_missing(conn, "sessions", "plan_json", "TEXT")
 
         # Kelime veritabanı seed — tablolar boşsa otomatik doldur
         await _seed_vocabulary(conn)

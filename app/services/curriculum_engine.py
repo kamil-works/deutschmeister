@@ -450,13 +450,33 @@ class CurriculumEngine:
         return defaults.get(level, "Serbest pratik")
 
     async def _get_consecutive_high_score(self, profile_id: str) -> int:
-        """Son kaç oturumda ardışık yüksek skor? (Profile tablosunda session_high_score_streak)"""
-        # Basit implementasyon — gerçek uygulamada session_insights tablosu kullanılacak
+        """
+        Son kaç oturumda ardışık session_quality >= 0.75?
+        session_insights tablosundaki tamamlanmış analizlerden okur.
+        Level-up için 3 ardışık yüksek skor gerekiyor.
+        """
+        import json as _json
         result = await self.db.execute(text("""
-            SELECT COUNT(*) FROM profiles WHERE id = :id
-        """), {"id": profile_id})
-        # TODO: session_insights tablosu hazır olunca buraya bağlanacak
-        return 1  # Şimdilik 1 döner — 3 gerekiyor, yani hemen atlamaz
+            SELECT data FROM session_insights
+            WHERE profile_id = :pid AND status = 'completed'
+            ORDER BY created_at DESC
+            LIMIT 5
+        """), {"pid": profile_id})
+        rows = result.fetchall()
+        if not rows:
+            return 0
+        consecutive = 0
+        for row in rows:
+            try:
+                data = _json.loads(row[0]) if row[0] else {}
+                quality = float(data.get("session_quality") or 0)
+                if quality >= 0.75:
+                    consecutive += 1
+                else:
+                    break
+            except Exception:
+                break
+        return consecutive
 
     def _opening_message(
         self,

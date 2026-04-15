@@ -63,6 +63,7 @@ class Session(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mode: Mapped[str] = mapped_column(String, default="conversation")  # conversation | pronunciation
+    plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # SessionPlan JSON (sticky plan)
 
     profile: Mapped["Profile"] = relationship(back_populates="sessions")
     phoneme_scores: Mapped[list["PhonemeScore"]] = relationship(back_populates="session", cascade="all, delete-orphan")
