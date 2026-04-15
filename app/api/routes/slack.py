@@ -200,6 +200,7 @@ async def _handle_message_event(event: dict):
 
     # Profile bul
     profile_id = await _get_profile_id(slack_user_id)
+    print(f"[SLACK] profile_id={profile_id} for slack_user={slack_user_id}", flush=True)
     if not profile_id:
         await _slack_post(
             channel,
@@ -227,11 +228,14 @@ async def _handle_message_event(event: dict):
         return
 
     # Chat logic'i direkt çağır
+    print(f"[SLACK] calling _chat_logic for profile={profile_id}", flush=True)
     try:
         from app.api.routes.chat import _chat_logic
         reply = await _chat_logic(profile_id=profile_id, message=text_msg)
+        print(f"[SLACK] _chat_logic returned: {repr(reply[:60])}", flush=True)
         await _slack_post(channel, text=reply)
     except Exception as e:
+        print(f"[SLACK] chat_error: {type(e).__name__}: {e}", flush=True)
         logger.error("chat_error", profile_id=profile_id, error=str(e))
         await _slack_post(channel, text="Öğretmen şu an yanıt veremiyor, biraz sonra tekrar dene.")
 
