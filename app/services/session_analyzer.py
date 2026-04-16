@@ -514,10 +514,12 @@ class SessionAnalyzer:
                 INSERT INTO daily_logs
                     (profile_id, log_date, session_count, total_duration_s,
                      words_learned, words_struggled, words_mastered,
-                     session_quality, anxiety_signal, ai_impressions, error_patterns)
+                     session_quality, anxiety_signal, ai_impressions, error_patterns,
+                     created_at, updated_at)
                 VALUES
                     (:pid, :today, 1, :dur, :learned, :struggled, :mastered,
-                     :quality, :anxiety, :summary, :errors)
+                     :quality, :anxiety, :summary, :errors,
+                     datetime('now'), datetime('now'))
             """), {
                 "pid": profile_id, "today": today_tr, "dur": duration_s,
                 "learned": mastered, "struggled": struggled, "mastered": mastered,
