@@ -154,18 +154,16 @@ async def handle_get_vocabulary_word(
     """), params)
     result = row.fetchone()
 
-    # Yoksa seviyedeki herhangi bir kelime
+    # Yoksa topic olmadan seviyedeki herhangi bir kelime (slug eşleşmese bile)
     if not result:
-        row = await db.execute(text(f"""
+        row = await db.execute(text("""
             SELECT w.id, w.word, w.article, w.plural, w.translation_tr,
                    w.example_de, w.level
             FROM words w
-            {topic_join}
             WHERE w.level = :level
-              {topic_filter}
             ORDER BY RANDOM()
             LIMIT 1
-        """), params)
+        """), {"level": level})
         result = row.fetchone()
 
     if not result:

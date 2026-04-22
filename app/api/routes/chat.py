@@ -330,7 +330,12 @@ async def _chat_logic(profile_id: str, message: str, db=None) -> str:
                 )
 
                 candidate = response.candidates[0] if response.candidates else None
-                if not candidate:
+                if not candidate or not candidate.content or not candidate.content.parts:
+                    # Güvenlik filtresi veya boş yanıt
+                    try:
+                        reply_text = response.text or "Yanıt oluşturulamadı."
+                    except Exception:
+                        pass
                     break
 
                 # Tool call var mı?
