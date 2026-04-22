@@ -1,47 +1,42 @@
 """
-Gemini Live API WebSocket proxy.
+Gemini Live API WebSocket proxy — google-genai SDK tabanlı.
 
-MİMARİ:
-  Client WS ──► FastAPI ──► Gemini Live WS
-  Her session için bire-bir bağlantı kurulur.
-  Proxy katmanı ses byte'larını parse etmez, olduğu gibi iletir.
+Önceki sürümdeki sorunlar:
+  - websockets kütüphanesiyle ham bağlantı → API değişince kırılıyor
+  - v1alpha endpoint deprecated
+  - snake_case field'lar (JSON proto camelCase bekliyor)
+  - CurriculumEngine/FSRSEngine hiç çağrılmıyordu
+  - Tool calling yoktu → artikeller hallüsinasyon
 
-CLAUDE.md'den kritik kurallar:
-  1. setup mesajı her şeyden ÖNCE gönderilir
-  2. VAD: endOfSpeechSensitivity=END_SENSITIVITY_LOW, silenceDurationMs=300
-  3. goAway gelince session_handle ile yeniden bağlan
-  4. 20s sessizlikte keepalive gönder
-  5. response.data zaten base64 → decode et, ham PCM gönder
+Bu sürümde:
+  - google-genai SDK kullanılıyor (URL/versiyon sorunları SDK'nın sorunu)
+  - CurriculumEngine session başında çağrılıyor → plan oluşturuluyor
+  - Tool calling eklendi → Gemini kelime üretemez, DB'den çeker
+  - Her tool call loglanıyor → test sırasında görünür
 """
+from __future__ import annotations
+
 import asyncio
 import base64
 import json
-import logging
-import time
-from typing import Any
 
 import structlog
-import websockets
 from fastapi import WebSocket, WebSocketDisconnect
+from google import genai
+from google.genai import types
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.services.curriculum_engine import CurriculumEngine
+from app.services.fsrs_engine import FSRSEngine
+from app.services.session_analyzer import SessionAnalyzer
+from app.services.tool_handlers import build_tools, dispatch_tool
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
 
-# Gemini Live API WebSocket URL
-GEMINI_WS_URL = (
-    "wss://generativelanguage.googleapis.com/ws/"
-    "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
-    "?key={api_key}"
-)
-
-# Sistem promptları
-TUTOR_PROMPT_PATH = "app/agent/prompts/tutor_system.txt"
+TUTOR_PROMPT_PATH        = "app/agent/prompts/tutor_system.txt"
 PRONUNCIATION_PROMPT_PATH = "app/agent/prompts/pronunciation_assessment.txt"
-
-KEEPALIVE_INTERVAL_S = 20   # Gemini ~30s'de idle bağlantıyı keser
-SESSION_WARN_S = 9 * 60     # 9. dakikada client'a uyarı
 
 
 def _load_prompt(path: str) -> str:
@@ -53,45 +48,34 @@ def _load_prompt(path: str) -> str:
         return "You are a helpful German language tutor for Turkish-speaking learners."
 
 
-def _build_setup_message(mode: str, profile_name: str, level: str) -> dict[str, Any]:
-    """
-    Gemini'ye gönderilecek ilk setup mesajı.
-    CLAUDE.md: setup mesajı ses verisi gelmeden ÖNCE gönderilmeli.
-    """
-    prompt_path = PRONUNCIATION_PROMPT_PATH if mode == "pronunciation" else TUTOR_PROMPT_PATH
-    system_instruction = _load_prompt(prompt_path)
-
-    # Profil bilgisini sisteme ekle
-    system_instruction += (
-        f"\n\nKullanıcı profili: Ad={profile_name}, Seviye={level}. "
-        "Her zaman Türkçe yanıt ver."
-    )
-
-    return {
-        "setup": {
-            "model": f"models/{settings.gemini_model_live}",
-            "generation_config": {
-                "response_modalities": ["AUDIO"],
-
-            },
-            "system_instruction": {
-                "parts": [{"text": system_instruction}]
-            },
-            "realtime_input_config": {
-                "automatic_activity_detection": {
-                    "disabled": False,
-                    # CLAUDE.md: Cümle ortasında kesilmeyi önler
-                    "end_of_speech_sensitivity": "END_SENSITIVITY_LOW",
-                    "silence_duration_ms": 300,
-                }
-            },
-            # Session resumption: goAway gelince context korunur
-            "session_resumption": {},
-            # Transkript: debugging + SQLite özet için
-            "input_audio_transcription": {},
-            "output_audio_transcription": {},
-        }
-    }
+def _build_plan_injection(plan) -> str:
+    """SessionPlan'dan Gemini sistem promptuna eklenecek metin bloğu."""
+    if plan is None:
+        return ""
+    lines = [
+        "\n\n[OTURUM PLANI]",
+        f"Hedef seviye: {getattr(plan, 'target_level', '')}",
+        f"Konu: {getattr(plan, 'focus_topic_tr', '')}",
+        f"Gramer odağı: {getattr(plan, 'grammar_focus', '')}",
+        f"Kaygı sinyali: {getattr(plan, 'anxiety_signal', 'low')}",
+    ]
+    vocab = getattr(plan, "vocabulary", []) or []
+    if vocab:
+        lines.append("Yeni kelimeler (DB'den doğrulanmış):")
+        for w in vocab[:10]:
+            article = w.get("article", "")
+            word    = w.get("word", "")
+            tr      = w.get("translation_tr", "")
+            lines.append(f"  - {article} {word} → {tr}")
+    review = getattr(plan, "review_words", []) or []
+    if review:
+        lines.append("Tekrar kelimeleri:")
+        for w in review[:5]:
+            lines.append(f"  - {w.get('article','')} {w.get('word','')}")
+    motivation = getattr(plan, "motivation_message", "")
+    if motivation:
+        lines.append(f"Motivasyon: {motivation}")
+    return "\n".join(lines)
 
 
 async def run_proxy(
@@ -100,232 +84,187 @@ async def run_proxy(
     mode: str,
     profile_name: str,
     level: str,
+    profile_id: str,
+    db: AsyncSession,
 ) -> None:
     """
-    İki yönlü proxy döngüsü.
-    client_ws (SvelteKit browser) ↔ gemini_ws (Gemini Live API)
+    Bidirectional proxy: tarayıcı ↔ FastAPI ↔ Gemini Live API
+
+    Yeni: CurriculumEngine session başında çağrılıyor + tool calling aktif.
     """
+    log = logger.bind(session_id=session_id, mode=mode)
+
     api_key = settings.gemini_api_key
     if not api_key:
-        await client_ws.close(code=1011, reason="Sunucu yapılandırma hatası")
+        await client_ws.close(code=1011, reason="GEMINI_API_KEY ayarlanmamış")
         return
 
-    url = GEMINI_WS_URL.format(api_key=api_key)
-    log = logger.bind(session_id=session_id, mode=mode)
-    session_start = time.time()
-    session_handle: str | None = None  # goAway sonrası resumption için
-
+    # ── 1. CurriculumEngine → SessionPlan ─────────────────────────────────
+    plan = None
     try:
-        async with websockets.connect(url, ping_interval=None) as gemini_ws:
-            log.info("gemini_ws_connected")
+        fsrs_engine  = FSRSEngine(db)
+        curriculum   = CurriculumEngine(db)
+        analyzer     = SessionAnalyzer(db)
+        last_insight = await analyzer.get_last_insight(profile_id)
+        fsrs_stats   = await fsrs_engine.get_stats(profile_id)
+        plan = await curriculum.get_session_plan(
+            profile_id=profile_id,
+            fsrs_stats=fsrs_stats,
+            last_session_insight=last_insight,
+        )
+        log.info("curriculum_plan_generated", level=getattr(plan, "target_level", ""))
+    except Exception as exc:
+        log.warning("curriculum_plan_failed", error=str(exc))
 
-            # ── KURAL 1: Setup mesajı ÖNCE gönderilir ──
-            setup_msg = _build_setup_message(mode, profile_name, level)
-            await gemini_ws.send(json.dumps(setup_msg))
-            log.debug("setup_sent", mode=mode)
+    # ── 2. Sistem prompt + plan injection ─────────────────────────────────
+    prompt_path    = PRONUNCIATION_PROMPT_PATH if mode == "pronunciation" else TUTOR_PROMPT_PATH
+    system_prompt  = _load_prompt(prompt_path)
+    system_prompt += f"\n\nKullanıcı: {profile_name}, Seviye: {level}"
+    system_prompt += _build_plan_injection(plan)
 
-            # Setup ACK bekle (Gemini setupComplete döner)
-            # Native-audio modeli binary formatında da yanıt verebilir
-            raw_ack = await gemini_ws.recv()
-            if isinstance(raw_ack, bytes):
-                try:
-                    ack = json.loads(raw_ack.decode('utf-8'))
-                except Exception:
-                    ack = {"setupComplete": True}  # binary setupComplete
-            else:
-                try:
-                    ack = json.loads(raw_ack)
-                except Exception:
-                    ack = {}
-            if "setupComplete" not in ack:
-                log.warning("unexpected_setup_response", data=str(ack)[:200])
-            else:
-                log.info("setup_complete_received")
-            # İstemciye setupComplete bildir
+    # ── 3. Gemini Live bağlantısı ──────────────────────────────────────────
+    try:
+        gemini_client = genai.Client(api_key=api_key)
+
+        live_config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            system_instruction=system_prompt,
+            tools=build_tools(),
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Aoede"
+                    )
+                )
+            ),
+        )
+
+        async with gemini_client.aio.live.connect(
+            model=settings.gemini_model_live,
+            config=live_config,
+        ) as gemini_session:
+            log.info("gemini_live_connected")
+
+            # Client'a bağlantı hazır sinyali ver
             try:
                 await client_ws.send_text(json.dumps({"setupComplete": {}}))
             except Exception:
                 pass
 
-            async def client_to_gemini() -> None:
-                """Client'tan gelen JSON mesajlarını Gemini'ye ilet."""
-                try:
-                    while True:
-                        data = await client_ws.receive_text()
-                        if settings.debug_ws:
-                            log.debug("client→gemini", byte_count=len(data))
-                        await gemini_ws.send(data)
-                except WebSocketDisconnect:
-                    log.info("client_disconnected")
-                except Exception as exc:
-                    log.error("client_to_gemini_error", error=str(exc))
-
-            async def gemini_to_client() -> None:
-                """
-                Gemini'den gelen mesajları işle ve client'a ilet.
-
-                CLAUDE.md'den keşfedilen kritik gerçekler (Nisan 2026):
-                  - Tüm Gemini yanıtları bytes (binary) frame olarak gelir
-                  - Her frame json.loads(bytes) ile decode edilebilir
-                  - Ses verisi: serverContent.modelTurn.parts[].inlineData (base64)
-                  - Output transkript: serverContent.outputTranscription.text
-                  - Input transkript: serverContent.inputTranscription.text
-                  - turnComplete: serverContent.turnComplete = true
-
-                Strateji:
-                  1. Ses içeren frame'lerde PCM'i binary olarak gönder
-                  2. Aynı frame'de başka alan varsa (transkript, turnComplete),
-                     ses'i sil → JSON olarak da gönder (ama 'thought' alanlarını filtrele)
-                  3. Ses olmayan frame'leri olduğu gibi JSON olarak ilet
-                """
-                nonlocal session_handle
-                try:
-                    async for raw in gemini_ws:
-                        if settings.debug_ws:
-                            log.debug("gemini→client", byte_count=len(raw))
-
-                        # Gemini her zaman bytes gönderir — JSON decode et
-                        try:
-                            data = raw if isinstance(raw, bytes) else raw.encode('utf-8')
-                            msg = json.loads(data)
-                        except Exception:
-                            # Gerçek binary (ses dışı) — yoksay
-                            log.debug("non_json_binary_skipped", size=len(raw))
-                            continue
-
-                        # GoAway: Gemini bağlantıyı kapatmak üzere
-                        if "goAway" in msg:
-                            log.warning("go_away_received", time_left_s=msg["goAway"].get("timeLeft"))
-                            await client_ws.send_text(json.dumps({"type": "goAway"}))
-                            continue
-
-                        # Session resumption handle güncelle
-                        if "sessionResumptionUpdate" in msg:
-                            update = msg["sessionResumptionUpdate"]
-                            if update.get("resumable") and update.get("newHandle"):
-                                session_handle = update["newHandle"]
-                                log.debug("session_handle_updated")
-                            continue
-
-                        try:
-                            server_content = msg.get("serverContent", {})
-
-                            # ── Ses verisi: base64 → PCM binary frame ──
-                            parts = server_content.get("modelTurn", {}).get("parts", [])
-                            has_audio = False
-                            for part in parts:
-                                if "inlineData" in part:
-                                    inline = part["inlineData"]
-                                    if inline.get("mimeType", "").startswith("audio/pcm"):
-                                        raw_pcm = base64.b64decode(inline["data"])
-                                        await client_ws.send_bytes(raw_pcm)
-                                        has_audio = True
-
-                            # ── JSON mesajı client'a ilet (ses frame'leri hariç) ──
-                            # Transkript, turnComplete, generationComplete vb. içeren mesajlar
-                            # Thought (düşünce zinciri) mesajlarını filtrele — gereksiz
-                            is_thought_only = (
-                                parts
-                                and all(
-                                    part.get("thought", False) and "inlineData" not in part
-                                    for part in parts
-                                )
-                            )
-
-                            has_transcript = (
-                                "outputTranscription" in server_content
-                                or "inputTranscription" in server_content
-                            )
-                            has_control = (
-                                server_content.get("turnComplete")
-                                or server_content.get("generationComplete")
-                                or server_content.get("interrupted")
-                            )
-
-                            if "serverContent" in msg and not is_thought_only:
-                                # Ses binary olarak gönderildiyse inlineData'yı JSON'dan sil
-                                if has_audio:
-                                    clean_parts = [
-                                        p for p in parts
-                                        if "inlineData" not in p
-                                    ]
-                                    if clean_parts or has_transcript or has_control:
-                                        # inlineData'sız temiz mesajı gönder
-                                        clean_msg = dict(msg)
-                                        clean_sc = dict(server_content)
-                                        if "modelTurn" in clean_sc:
-                                            if clean_parts:
-                                                clean_sc["modelTurn"] = {"parts": clean_parts}
-                                            else:
-                                                del clean_sc["modelTurn"]
-                                        clean_msg["serverContent"] = clean_sc
-                                        await client_ws.send_text(json.dumps(clean_msg))
-                                else:
-                                    # Ses olmayan — olduğu gibi gönder
-                                    await client_ws.send_text(json.dumps(msg))
-
-                            elif "toolCall" in msg:
-                                await client_ws.send_text(json.dumps(msg))
-
-                            if has_transcript or has_control:
-                                log.debug(
-                                    "transcript_or_control_forwarded",
-                                    has_output_transcript=has_transcript,
-                                    turn_complete=server_content.get("turnComplete"),
-                                )
-
-                        except Exception as exc:
-                            log.error("message_parse_error", error=str(exc))
-
-                except websockets.exceptions.ConnectionClosed:
-                    log.info("gemini_ws_closed")
-                except Exception as exc:
-                    log.error("gemini_to_client_error", error=str(exc))
-
-            async def keepalive_sender() -> None:
-                """
-                CLAUDE.md: Gemini ~30s sessizlikte bağlantıyı keser.
-                20s'de bir keepalive gönder.
-                """
-                try:
-                    while True:
-                        await asyncio.sleep(KEEPALIVE_INTERVAL_S)
-                        elapsed = time.time() - session_start
-                        if elapsed >= SESSION_WARN_S:
-                            await client_ws.send_text(json.dumps({
-                                "type": "sessionWarning",
-                                "message": "Oturum 1 dakika içinde sona erecek."
-                            }))
-                        keepalive = {
-                            "clientContent": {
-                                "turnComplete": False
-                            }
-                        }
-                        await gemini_ws.send(json.dumps(keepalive))
-                        log.debug("keepalive_sent", elapsed_s=round(elapsed))
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:
-                    log.debug("keepalive_stopped", reason=str(exc))
-
-            # Üç görevi eş zamanlı çalıştır
-            tasks = await asyncio.gather(
-                client_to_gemini(),
-                gemini_to_client(),
-                keepalive_sender(),
-                return_exceptions=True,
+            await asyncio.gather(
+                _client_to_gemini(client_ws, gemini_session, log),
+                _gemini_to_client(client_ws, gemini_session, db, profile_id, log),
             )
 
-            for task_result in tasks:
-                if isinstance(task_result, Exception):
-                    log.error("proxy_task_exception", error=str(task_result))
-
-    except websockets.exceptions.InvalidURI:
-        log.error("invalid_gemini_uri")
-        await client_ws.close(code=1011, reason="Bağlantı adresi geçersiz")
+    except WebSocketDisconnect:
+        log.info("ws_client_disconnected")
     except Exception as exc:
         log.error("proxy_fatal_error", error=str(exc))
         try:
             await client_ws.close(code=1011, reason="Sunucu hatası")
         except Exception:
             pass
+
+
+async def _client_to_gemini(
+    client_ws: WebSocket,
+    gemini_session,
+    log,
+) -> None:
+    """
+    Tarayıcıdan gelen ses chunk'larını Gemini'ye ilet.
+    Client format: {"realtime_input": {"media_chunks": [{"mime_type": "audio/pcm", "data": b64}]}}
+    """
+    try:
+        while True:
+            raw = await client_ws.receive_text()
+            msg = json.loads(raw)
+
+            chunks = (
+                msg.get("realtime_input", {}).get("media_chunks", [])
+                or msg.get("realtimeInput", {}).get("mediaChunks", [])
+            )
+            for chunk in chunks:
+                pcm_bytes = base64.b64decode(chunk.get("data", ""))
+                if not pcm_bytes:
+                    continue
+                await gemini_session.send(
+                    input=types.LiveClientRealtimeInput(
+                        media_chunks=[
+                            types.Blob(
+                                mime_type="audio/pcm;rate=16000",
+                                data=pcm_bytes,
+                            )
+                        ]
+                    )
+                )
+    except WebSocketDisconnect:
+        log.info("client_disconnected_audio")
+    except Exception as exc:
+        log.error("client_to_gemini_error", error=str(exc))
+
+
+async def _gemini_to_client(
+    client_ws: WebSocket,
+    gemini_session,
+    db: AsyncSession,
+    profile_id: str,
+    log,
+) -> None:
+    """
+    Gemini'den gelen yanıtları işle:
+      - Ses verisi → binary frame olarak client'a gönder
+      - Tool call → handler çalıştır, sonucu Gemini'ye gönder (logla)
+      - turnComplete → client'a bildir
+    """
+    try:
+        async for response in gemini_session:
+            # ── Ses ──
+            if response.data:
+                await client_ws.send_bytes(response.data)
+
+            # ── Tool call ──
+            if response.tool_call:
+                fn_responses = []
+                for fc in response.tool_call.function_calls:
+                    result = await dispatch_tool(
+                        name=fc.name,
+                        args=dict(fc.args),
+                        db=db,
+                        profile_id=profile_id,
+                    )
+                    log.info("voice_tool_call", name=fc.name, result_keys=list(result.keys()))
+                    fn_responses.append(
+                        types.FunctionResponse(
+                            id=fc.id,
+                            name=fc.name,
+                            response=result,
+                        )
+                    )
+                await gemini_session.send(
+                    input=types.LiveClientToolResponse(
+                        function_responses=fn_responses,
+                    )
+                )
+
+            # ── Turn complete ──
+            sc = getattr(response, "server_content", None)
+            if sc and getattr(sc, "turn_complete", False):
+                try:
+                    await client_ws.send_text(
+                        json.dumps({"serverContent": {"turnComplete": True}})
+                    )
+                except Exception:
+                    pass
+
+            # ── Interrupted ──
+            if sc and getattr(sc, "interrupted", False):
+                try:
+                    await client_ws.send_text(
+                        json.dumps({"serverContent": {"interrupted": True}})
+                    )
+                except Exception:
+                    pass
+
+    except Exception as exc:
+        log.error("gemini_to_client_error", error=str(exc))

@@ -311,17 +311,57 @@ async def _chat_logic(profile_id: str, message: str, db=None) -> str:
         ]
 
         try:
-            client = genai.Client(api_key=settings.gemini_api_key)
-            response = client.models.generate_content(
-                model=settings.gemini_model_text,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=0.7,
-                    max_output_tokens=2048,
-                ),
-            )
-            reply_text = response.text or "Yanıt oluşturulamadı."
+            from app.services.tool_handlers import build_tools, dispatch_tool
+            gemini_client = genai.Client(api_key=settings.gemini_api_key)
+            tools = build_tools()
+            reply_text = "Yanıt oluşturulamadı."
+
+            # Tool calling döngüsü: Gemini tool_call dönmediği sürece tekrarla
+            for _ in range(10):  # sonsuz döngü yerine güvenli üst limit
+                response = gemini_client.models.generate_content(
+                    model=settings.gemini_model_text,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        tools=tools,
+                        temperature=0.7,
+                        max_output_tokens=2048,
+                    ),
+                )
+
+                candidate = response.candidates[0] if response.candidates else None
+                if not candidate:
+                    break
+
+                # Tool call var mı?
+                fn_call = next(
+                    (p.function_call for p in candidate.content.parts if p.function_call),
+                    None,
+                )
+
+                if fn_call is None:
+                    # Tool call yok — yanıt hazır
+                    reply_text = response.text or "Yanıt oluşturulamadı."
+                    break
+
+                # Tool'u çalıştır, sonucu contents'e ekle
+                tool_result = await dispatch_tool(
+                    name=fn_call.name,
+                    args=dict(fn_call.args),
+                    db=db,
+                    profile_id=profile_id,
+                )
+                contents.append(candidate.content)
+                contents.append(types.Content(
+                    role="tool",
+                    parts=[types.Part(
+                        function_response=types.FunctionResponse(
+                            name=fn_call.name,
+                            response=tool_result,
+                        )
+                    )],
+                ))
+
         except Exception as exc:
             logger.error("gemini_chat_error", error=str(exc))
             reply_text = "Bir hata oluştu, lütfen tekrar dene."

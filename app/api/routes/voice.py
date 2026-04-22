@@ -84,6 +84,8 @@ async def voice_websocket(
             mode=session.mode,
             profile_name=profile.name,
             level=profile.level,
+            profile_id=profile.id,
+            db=db,
         )
     except WebSocketDisconnect:
         log.info("ws_client_disconnected")
