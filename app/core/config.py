@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: str = ""
-    gemini_model_live: str = "gemini-2.0-flash-live-001"
+    gemini_model_live: str = "gemini-2.0-flash-exp"
     gemini_model_text: str = "gemini-2.5-flash"
 
     # Database
