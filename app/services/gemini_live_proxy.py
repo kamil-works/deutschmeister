@@ -159,7 +159,7 @@ async def run_proxy(
     except WebSocketDisconnect:
         log.info("ws_client_disconnected")
     except Exception as exc:
-        log.error("proxy_fatal_error", error=str(exc))
+        log.error("proxy_fatal_error", error=repr(exc), exc_type=type(exc).__name__)
         try:
             await client_ws.close(code=1011, reason="Sunucu hatası")
         except Exception:
